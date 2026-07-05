@@ -1,0 +1,208 @@
+package com.busantiming.batch;
+
+import com.busantiming.domain.TourismInfo;
+import com.busantiming.domain.TourismInfoRepository;
+import com.busantiming.domain.TourismPrediction;
+import com.busantiming.domain.TourismPredictionRepository;
+import com.busantiming.sync.*;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.job.builder.JobBuilder;
+import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
+
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Configuration
+public class ApiSyncBatchConfig {
+
+    private final TourismInfoRepository tourismInfoRepository;
+    private final TourismPredictionRepository tourismPredictionRepository;
+    private final SyncPlaceRepository syncPlaceRepository;
+    private final SyncCongestionForecastRepository syncCongestionForecastRepository;
+
+    public ApiSyncBatchConfig(TourismInfoRepository tourismInfoRepository,
+                              TourismPredictionRepository tourismPredictionRepository,
+                              SyncPlaceRepository syncPlaceRepository,
+                              SyncCongestionForecastRepository syncCongestionForecastRepository) {
+        this.tourismInfoRepository = tourismInfoRepository;
+        this.tourismPredictionRepository = tourismPredictionRepository;
+        this.syncPlaceRepository = syncPlaceRepository;
+        this.syncCongestionForecastRepository = syncCongestionForecastRepository;
+    }
+
+    @Bean
+    public Job apiSyncJob(JobRepository jobRepository, Step syncPlacesStep, Step syncCongestionForecastsStep) {
+        return new JobBuilder("apiSyncJob", jobRepository)
+                .incrementer(new RunIdIncrementer())
+                .start(syncPlacesStep)
+                .next(syncCongestionForecastsStep)
+                .listener(new TourismJobListener())
+                .build();
+    }
+
+    @Bean
+    public Step syncPlacesStep(JobRepository jobRepository, PlatformTransactionManager transactionManager) {
+        return new StepBuilder("syncPlacesStep", jobRepository)
+                .tasklet(syncPlacesTasklet(), transactionManager)
+                .build();
+    }
+
+    @Bean
+    public Step syncCongestionForecastsStep(JobRepository jobRepository, PlatformTransactionManager transactionManager) {
+        return new StepBuilder("syncCongestionForecastsStep", jobRepository)
+                .tasklet(syncCongestionForecastsTasklet(), transactionManager)
+                .build();
+    }
+
+    @Bean
+    public Tasklet syncPlacesTasklet() {
+        return (contribution, chunkContext) -> {
+            log.info("public.tourism_info → busan_timing_api.places 동기화 시작");
+
+            List<TourismInfo> tourismInfoList = tourismInfoRepository.findAll();
+            if (tourismInfoList.isEmpty()) {
+                throw new RuntimeException("tourism_info 데이터가 없습니다. 동기화를 중단합니다.");
+            }
+
+            Map<String, SyncPlace> existingMap = syncPlaceRepository.findAll().stream()
+                    .filter(p -> p.getContentId() != null)
+                    .collect(Collectors.toMap(SyncPlace::getContentId, Function.identity(), (a, b) -> a));
+
+            LocalDateTime now = LocalDateTime.now();
+            List<SyncPlace> toSave = new ArrayList<>();
+
+            for (TourismInfo info : tourismInfoList) {
+                if (info.getContentId() == null) continue;
+
+                SyncPlace existing = existingMap.get(info.getContentId());
+                if (existing != null) {
+                    updatePlace(existing, info, now);
+                    toSave.add(existing);
+                } else {
+                    toSave.add(createPlace(info, now));
+                }
+            }
+
+            syncPlaceRepository.saveAll(toSave);
+            log.info("places 동기화 완료: {}건 upsert", toSave.size());
+
+            return RepeatStatus.FINISHED;
+        };
+    }
+
+    @Bean
+    public Tasklet syncCongestionForecastsTasklet() {
+        return (contribution, chunkContext) -> {
+            log.info("public.tourism_concentration → busan_timing_api.congestion_forecasts 동기화 시작");
+
+            List<TourismInfo> tourismInfoList = tourismInfoRepository.findAll();
+            List<TourismPrediction> predictions = tourismPredictionRepository.findAll();
+
+            if (predictions.isEmpty()) {
+                log.warn("tourism_concentration 데이터가 없습니다. 혼잡도 동기화를 건너뜁니다.");
+                return RepeatStatus.FINISHED;
+            }
+
+            PlaceMatchingService matchingService = new PlaceMatchingService(tourismInfoList);
+
+            Map<String, SyncPlace> placeByContentId = syncPlaceRepository.findAll().stream()
+                    .filter(p -> p.getContentId() != null)
+                    .collect(Collectors.toMap(SyncPlace::getContentId, Function.identity(), (a, b) -> a));
+
+            int matchedCount = 0;
+            int unmatchedCount = 0;
+            List<String> unmatchedReport = new ArrayList<>();
+
+            Set<String> processedAttractionNames = new HashSet<>();
+            for (TourismPrediction prediction : predictions) {
+                String attractionName = prediction.getTourAttractionName();
+
+                PlaceMatchResult matchResult = matchingService.match(attractionName, prediction.getSignguNm());
+
+                if (!matchResult.isMatched()) {
+                    if (processedAttractionNames.add(attractionName)) {
+                        unmatchedCount++;
+                        unmatchedReport.add(String.format(
+                                "[매칭실패] signgu_cd=%s, signgu_nm=%s, tour_attraction_name=%s, base_ymd=%s, cnctr_rate=%s, 사유=%s",
+                                prediction.getSignguCd(), prediction.getSignguNm(),
+                                attractionName, prediction.getBaseYmd(),
+                                prediction.getCnctrRate(), matchResult.getFailureReason()));
+                    }
+                    continue;
+                }
+
+                TourismInfo matched = matchResult.getTourismInfo();
+                SyncPlace place = placeByContentId.get(matched.getContentId());
+                if (place == null) continue;
+
+                Integer score = SyncDataTransformer.clampCongestionScore(prediction.getCnctrRate());
+                if (score == null) continue;
+
+                syncCongestionForecastRepository.upsert(place.getId(), prediction.getBaseYmd(), score);
+                matchedCount++;
+            }
+
+            if (!unmatchedReport.isEmpty()) {
+                log.warn("혼잡도 매칭 실패 관광지 {}건:", unmatchedCount);
+                unmatchedReport.forEach(log::warn);
+            }
+
+            syncPlaceRepository.updateMonthlyAverageCongestionScores();
+
+            log.info("congestion_forecasts 동기화 완료: 매칭성공={}건, 매칭실패={}건", matchedCount, unmatchedCount);
+
+            return RepeatStatus.FINISHED;
+        };
+    }
+
+    private SyncPlace createPlace(TourismInfo info, LocalDateTime now) {
+        String districtName = SyncDataTransformer.extractDistrictName(info.getAddr1());
+        return SyncPlace.builder()
+                .contentId(info.getContentId())
+                .name(info.getTitle() != null ? info.getTitle().trim() : "")
+                .districtName(districtName.isEmpty() ? "기타" : districtName)
+                .districtCode(info.getLDongSignguCd() != null ? info.getLDongSignguCd() : "00000")
+                .category(SyncDataTransformer.mapCategory(info.getContentTypeId()))
+                .theme(SyncDataTransformer.mapCategory(info.getContentTypeId()))
+                .address(SyncDataTransformer.buildAddress(info.getAddr1(), info.getAddr2()))
+                .imageUrl(SyncDataTransformer.resolveImageUrl(info.getFirstImage(), info.getFirstImage2()))
+                .lat(SyncDataTransformer.parseCoordinate(info.getMapy()))
+                .lng(SyncDataTransformer.parseCoordinate(info.getMapx()))
+                .description(info.getTitle() != null ? info.getTitle().trim() + " 관광지 정보입니다." : "")
+                .last7DaysDetailViewCount(0)
+                .monthlyDetailViewCount(0)
+                .monthlyAverageCongestionScore(0)
+                .active(true)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private void updatePlace(SyncPlace place, TourismInfo info, LocalDateTime now) {
+        String districtName = SyncDataTransformer.extractDistrictName(info.getAddr1());
+        place.setName(info.getTitle() != null ? info.getTitle().trim() : place.getName());
+        place.setDistrictName(districtName.isEmpty() ? place.getDistrictName() : districtName);
+        place.setDistrictCode(info.getLDongSignguCd() != null ? info.getLDongSignguCd() : place.getDistrictCode());
+        place.setCategory(SyncDataTransformer.mapCategory(info.getContentTypeId()));
+        place.setTheme(SyncDataTransformer.mapCategory(info.getContentTypeId()));
+        place.setAddress(SyncDataTransformer.buildAddress(info.getAddr1(), info.getAddr2()));
+        place.setImageUrl(SyncDataTransformer.resolveImageUrl(info.getFirstImage(), info.getFirstImage2()));
+        place.setLat(SyncDataTransformer.parseCoordinate(info.getMapy()));
+        place.setLng(SyncDataTransformer.parseCoordinate(info.getMapx()));
+        place.setDescription(info.getTitle() != null ? info.getTitle().trim() + " 관광지 정보입니다." : place.getDescription());
+        place.setActive(true);
+        place.setUpdatedAt(now);
+    }
+}
