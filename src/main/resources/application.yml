@@ -1,0 +1,29 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/busan_timing
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: true
+  batch:
+    jdbc:
+      initialize-schema: always
+    job:
+      enabled: false
+
+api:
+  data-go-kr:
+    base-url: https://apis.data.go.kr/B551011/TatsCnctrRateService
+    service-key: ${API_SERVICE_KEY}
+    num-of-rows: 100
+
+logging:
+  level:
+    com.busantiming: DEBUG
+    org.springframework.batch: INFO
