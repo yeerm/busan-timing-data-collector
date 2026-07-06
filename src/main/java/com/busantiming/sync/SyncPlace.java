@@ -30,11 +30,8 @@ public class SyncPlace {
     @Column(name = "district_code", nullable = false, length = 20)
     private String districtCode;
 
-    @Column(nullable = false, length = 100)
-    private String category;
-
-    @Column(nullable = false, length = 100)
-    private String theme;
+    @Column(name = "content_type_id", nullable = false)
+    private int contentTypeId;
 
     @Column(nullable = false, length = 500)
     private String address;

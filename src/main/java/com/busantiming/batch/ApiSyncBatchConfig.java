@@ -31,15 +31,18 @@ public class ApiSyncBatchConfig {
     private final TourismPredictionRepository tourismPredictionRepository;
     private final SyncPlaceRepository syncPlaceRepository;
     private final SyncCongestionForecastRepository syncCongestionForecastRepository;
+    private final ContentTypeMappingRepository contentTypeMappingRepository;
 
     public ApiSyncBatchConfig(TourismInfoRepository tourismInfoRepository,
                               TourismPredictionRepository tourismPredictionRepository,
                               SyncPlaceRepository syncPlaceRepository,
-                              SyncCongestionForecastRepository syncCongestionForecastRepository) {
+                              SyncCongestionForecastRepository syncCongestionForecastRepository,
+                              ContentTypeMappingRepository contentTypeMappingRepository) {
         this.tourismInfoRepository = tourismInfoRepository;
         this.tourismPredictionRepository = tourismPredictionRepository;
         this.syncPlaceRepository = syncPlaceRepository;
         this.syncCongestionForecastRepository = syncCongestionForecastRepository;
+        this.contentTypeMappingRepository = contentTypeMappingRepository;
     }
 
     @Bean
@@ -76,27 +79,40 @@ public class ApiSyncBatchConfig {
                 throw new RuntimeException("tourism_info 데이터가 없습니다. 동기화를 중단합니다.");
             }
 
+            Set<Integer> validContentTypeIds = contentTypeMappingRepository.findAllContentTypeIds();
+            ContentTypeValidator validator = new ContentTypeValidator(validContentTypeIds);
+            log.info("유효한 content_type_id 목록: {}", validContentTypeIds);
+
             Map<String, SyncPlace> existingMap = syncPlaceRepository.findAll().stream()
                     .filter(p -> p.getContentId() != null)
                     .collect(Collectors.toMap(SyncPlace::getContentId, Function.identity(), (a, b) -> a));
 
             LocalDateTime now = LocalDateTime.now();
             List<SyncPlace> toSave = new ArrayList<>();
+            int skippedCount = 0;
 
             for (TourismInfo info : tourismInfoList) {
                 if (info.getContentId() == null) continue;
 
+                Integer contentTypeId = validator.parseAndValidate(info.getContentTypeId());
+                if (contentTypeId == null) {
+                    skippedCount++;
+                    log.warn("[SKIP] contentId={}, contentTypeId={} - 유효하지 않은 content_type_id",
+                            info.getContentId(), info.getContentTypeId());
+                    continue;
+                }
+
                 SyncPlace existing = existingMap.get(info.getContentId());
                 if (existing != null) {
-                    updatePlace(existing, info, now);
+                    updatePlace(existing, info, contentTypeId, now);
                     toSave.add(existing);
                 } else {
-                    toSave.add(createPlace(info, now));
+                    toSave.add(createPlace(info, contentTypeId, now));
                 }
             }
 
             syncPlaceRepository.saveAll(toSave);
-            log.info("places 동기화 완료: {}건 upsert", toSave.size());
+            log.info("places 동기화 완료: {}건 upsert, {}건 skip (유효하지 않은 content_type_id)", toSave.size(), skippedCount);
 
             return RepeatStatus.FINISHED;
         };
@@ -167,15 +183,14 @@ public class ApiSyncBatchConfig {
         };
     }
 
-    private SyncPlace createPlace(TourismInfo info, LocalDateTime now) {
+    private SyncPlace createPlace(TourismInfo info, int contentTypeId, LocalDateTime now) {
         String districtName = SyncDataTransformer.extractDistrictName(info.getAddr1());
         return SyncPlace.builder()
                 .contentId(info.getContentId())
                 .name(info.getTitle() != null ? info.getTitle().trim() : "")
                 .districtName(districtName.isEmpty() ? "기타" : districtName)
                 .districtCode(info.getLDongSignguCd() != null ? info.getLDongSignguCd() : "00000")
-                .category(SyncDataTransformer.mapCategory(info.getContentTypeId()))
-                .theme(SyncDataTransformer.mapCategory(info.getContentTypeId()))
+                .contentTypeId(contentTypeId)
                 .address(SyncDataTransformer.buildAddress(info.getAddr1(), info.getAddr2()))
                 .imageUrl(SyncDataTransformer.resolveImageUrl(info.getFirstImage(), info.getFirstImage2()))
                 .lat(SyncDataTransformer.parseCoordinate(info.getMapy()))
@@ -190,13 +205,12 @@ public class ApiSyncBatchConfig {
                 .build();
     }
 
-    private void updatePlace(SyncPlace place, TourismInfo info, LocalDateTime now) {
+    private void updatePlace(SyncPlace place, TourismInfo info, int contentTypeId, LocalDateTime now) {
         String districtName = SyncDataTransformer.extractDistrictName(info.getAddr1());
         place.setName(info.getTitle() != null ? info.getTitle().trim() : place.getName());
         place.setDistrictName(districtName.isEmpty() ? place.getDistrictName() : districtName);
         place.setDistrictCode(info.getLDongSignguCd() != null ? info.getLDongSignguCd() : place.getDistrictCode());
-        place.setCategory(SyncDataTransformer.mapCategory(info.getContentTypeId()));
-        place.setTheme(SyncDataTransformer.mapCategory(info.getContentTypeId()));
+        place.setContentTypeId(contentTypeId);
         place.setAddress(SyncDataTransformer.buildAddress(info.getAddr1(), info.getAddr2()));
         place.setImageUrl(SyncDataTransformer.resolveImageUrl(info.getFirstImage(), info.getFirstImage2()));
         place.setLat(SyncDataTransformer.parseCoordinate(info.getMapy()));
