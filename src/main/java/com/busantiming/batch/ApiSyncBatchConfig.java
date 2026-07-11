@@ -16,8 +16,11 @@ import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import java.sql.Date;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.Function;
@@ -32,17 +35,22 @@ public class ApiSyncBatchConfig {
     private final SyncPlaceRepository syncPlaceRepository;
     private final SyncCongestionForecastRepository syncCongestionForecastRepository;
     private final ContentTypeMappingRepository contentTypeMappingRepository;
+    private final JdbcTemplate jdbcTemplate;
+
+    private static final int BATCH_SIZE = 500;
 
     public ApiSyncBatchConfig(TourismInfoRepository tourismInfoRepository,
                               TourismPredictionRepository tourismPredictionRepository,
                               SyncPlaceRepository syncPlaceRepository,
                               SyncCongestionForecastRepository syncCongestionForecastRepository,
-                              ContentTypeMappingRepository contentTypeMappingRepository) {
+                              ContentTypeMappingRepository contentTypeMappingRepository,
+                              JdbcTemplate jdbcTemplate) {
         this.tourismInfoRepository = tourismInfoRepository;
         this.tourismPredictionRepository = tourismPredictionRepository;
         this.syncPlaceRepository = syncPlaceRepository;
         this.syncCongestionForecastRepository = syncCongestionForecastRepository;
         this.contentTypeMappingRepository = contentTypeMappingRepository;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Bean
@@ -137,9 +145,9 @@ public class ApiSyncBatchConfig {
                     .filter(p -> p.getContentId() != null)
                     .collect(Collectors.toMap(SyncPlace::getContentId, Function.identity(), (a, b) -> a));
 
-            int matchedCount = 0;
             int unmatchedCount = 0;
             List<String> unmatchedReport = new ArrayList<>();
+            List<Object[]> upsertParams = new ArrayList<>();
 
             Set<String> processedAttractionNames = new HashSet<>();
             for (TourismPrediction prediction : predictions) {
@@ -166,8 +174,19 @@ public class ApiSyncBatchConfig {
                 Integer score = SyncDataTransformer.clampCongestionScore(prediction.getCnctrRate());
                 if (score == null) continue;
 
-                syncCongestionForecastRepository.upsert(place.getId(), prediction.getBaseYmd(), score);
-                matchedCount++;
+                upsertParams.add(new Object[]{place.getId(), Date.valueOf(prediction.getBaseYmd()), score});
+            }
+
+            String sql = """
+                    INSERT INTO busan_timing_api.congestion_forecasts (place_id, forecast_date, congestion_score, created_at, updated_at)
+                    VALUES (?, ?, ?, now(), now())
+                    ON CONFLICT (place_id, forecast_date)
+                    DO UPDATE SET congestion_score = EXCLUDED.congestion_score, updated_at = now()
+                    """;
+
+            for (int i = 0; i < upsertParams.size(); i += BATCH_SIZE) {
+                List<Object[]> batch = upsertParams.subList(i, Math.min(i + BATCH_SIZE, upsertParams.size()));
+                jdbcTemplate.batchUpdate(sql, batch);
             }
 
             if (!unmatchedReport.isEmpty()) {
@@ -177,7 +196,7 @@ public class ApiSyncBatchConfig {
 
             syncPlaceRepository.updateMonthlyAverageCongestionScores();
 
-            log.info("congestion_forecasts 동기화 완료: 매칭성공={}건, 매칭실패={}건", matchedCount, unmatchedCount);
+            log.info("congestion_forecasts 동기화 완료: 매칭성공={}건, 매칭실패={}건", upsertParams.size(), unmatchedCount);
 
             return RepeatStatus.FINISHED;
         };
