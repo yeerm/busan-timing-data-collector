@@ -1,0 +1,56 @@
+name: Batch Jobs
+
+on:
+  schedule:
+    - cron: '0 15 * * *'   # tourismPredictionJob - 매일 00:00 KST
+    - cron: '30 15 * * 0'  # tourismInfoJob - 매주 월요일 00:30 KST (UTC 기준 일요일)
+    - cron: '0 16 * * *'   # apiSyncJob - 매일 01:00 KST
+  workflow_dispatch:
+    inputs:
+      job_name:
+        description: '실행할 배치 Job'
+        required: true
+        type: choice
+        options:
+          - tourismPredictionJob
+          - tourismInfoJob
+          - apiSyncJob
+
+jobs:
+  run-batch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build
+        run: ./gradlew bootJar --no-daemon
+
+      - name: Determine job name
+        id: job
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "name=${{ inputs.job_name }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" == "0 15 * * *" ]; then
+            echo "name=tourismPredictionJob" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" == "30 15 * * 0" ]; then
+            echo "name=tourismInfoJob" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" == "0 16 * * *" ]; then
+            echo "name=apiSyncJob" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run batch job
+        env:
+          SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+          API_SERVICE_KEY: ${{ secrets.API_SERVICE_KEY }}
+        run: |
+          java -jar build/libs/*.jar \
+            --spring.batch.job.enabled=true \
+            --spring.batch.job.name=${{ steps.job.outputs.name }} \
+            --spring.main.web-application-type=none
