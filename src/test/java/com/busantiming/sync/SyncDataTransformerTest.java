@@ -145,4 +145,31 @@ class SyncDataTransformerTest {
         assertEquals(0.0, SyncDataTransformer.parseCoordinate(""));
         assertEquals(0.0, SyncDataTransformer.parseCoordinate("invalid"));
     }
+
+    @Test
+    void resolveDescription_usesOverviewWhenPresent() {
+        assertEquals("광안리해수욕장은 부산의 대표 해변입니다.",
+                SyncDataTransformer.resolveDescription("광안리해수욕장은 부산의 대표 해변입니다.", "광안리해수욕장"));
+    }
+
+    @Test
+    void resolveDescription_trimsOverview() {
+        assertEquals("설명 본문", SyncDataTransformer.resolveDescription("  설명 본문  ", "제목"));
+    }
+
+    @Test
+    void resolveDescription_fallsBackWhenOverviewBlank() {
+        assertEquals("광안리해수욕장 관광지 정보입니다.",
+                SyncDataTransformer.resolveDescription("", "광안리해수욕장"));
+        assertEquals("광안리해수욕장 관광지 정보입니다.",
+                SyncDataTransformer.resolveDescription("   ", "광안리해수욕장"));
+        assertEquals("광안리해수욕장 관광지 정보입니다.",
+                SyncDataTransformer.resolveDescription(null, "  광안리해수욕장  "));
+    }
+
+    @Test
+    void resolveDescription_emptyWhenNoOverviewAndNoTitle() {
+        assertEquals("", SyncDataTransformer.resolveDescription(null, null));
+        assertEquals("", SyncDataTransformer.resolveDescription("", null));
+    }
 }

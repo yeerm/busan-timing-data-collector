@@ -63,6 +63,9 @@ public class TourismInfo {
     @Column(name = "modified_time", length = 20)
     private String modifiedTime;
 
+    @Column(name = "overview", columnDefinition = "text")
+    private String overview;
+
     @Column(name = "collected_at", nullable = false)
     private LocalDateTime collectedAt;
 }

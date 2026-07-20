@@ -1,5 +1,6 @@
 package com.busantiming.service;
 
+import com.busantiming.dto.TourismDetailResponse;
 import com.busantiming.dto.TourismInfoResponse;
 import com.busantiming.dto.TourismInfoResponse.Item;
 import com.busantiming.dto.TourismInfoResponse.Items;
@@ -83,6 +84,61 @@ public class TourismInfoApiService {
         } catch (Exception e) {
             log.error("KorService2 API 호출 실패: {}", e.getMessage(), e);
             return Collections.emptyList();
+        }
+    }
+
+    /**
+     * detailCommon2(공통정보 조회)로 특정 콘텐츠의 overview(설명)를 가져온다.
+     * 설명이 없거나 호출 실패 시 null을 반환한다.
+     */
+    public String fetchOverview(String contentId) {
+        if (contentId == null || contentId.isBlank()) {
+            return null;
+        }
+
+        URI uri = UriComponentsBuilder.fromHttpUrl(BASE_URL + "/detailCommon2")
+                .queryParam("serviceKey", serviceKey)
+                .queryParam("MobileOS", "ETC")
+                .queryParam("MobileApp", "BusanTimingDataCollector")
+                .queryParam("_type", "json")
+                .queryParam("contentId", contentId)
+                .build(true)
+                .toUri();
+
+        try {
+            TourismDetailResponse response = restTemplate.getForObject(uri, TourismDetailResponse.class);
+
+            if (response == null || response.getResponse() == null) {
+                return null;
+            }
+
+            var header = response.getResponse().getHeader();
+            if (header == null || !"0000".equals(header.getResultCode())) {
+                log.warn("detailCommon2 에러: contentId={}, code={}", contentId,
+                        header != null ? header.getResultCode() : "null");
+                return null;
+            }
+
+            var body = response.getResponse().getBody();
+            if (body == null || body.getItems() == null || body.getItems() instanceof String) {
+                return null;
+            }
+
+            TourismDetailResponse.Items items =
+                    objectMapper.convertValue(body.getItems(), TourismDetailResponse.Items.class);
+            if (items.getItem() == null || items.getItem().isEmpty()) {
+                return null;
+            }
+
+            String overview = items.getItem().get(0).getOverview();
+            if (overview == null || overview.isBlank()) {
+                return null;
+            }
+            return overview.trim();
+
+        } catch (Exception e) {
+            log.error("detailCommon2 호출 실패: contentId={}, {}", contentId, e.getMessage());
+            return null;
         }
     }
 
