@@ -103,13 +103,16 @@ public class TourismInfoBatchConfig {
     }
 
     /**
-     * overview 결정: 기존에 같은 content_id가 있고 modified_time이 동일하면 캐시된 값을 재사용하고,
-     * 신규이거나 modified_time이 바뀐 경우에만 detailCommon2를 호출한다.
-     * (설명이 아예 없는 콘텐츠도 modified_time이 같으면 재조회하지 않는다.)
+     * overview 결정: 기존에 같은 content_id의 overview가 이미 채워져 있고 modified_time이 동일하면
+     * 캐시된 값을 재사용하고, 신규이거나 modified_time이 바뀐 경우, 또는 아직 overview가 비어있는
+     * 경우에만 detailCommon2를 호출한다.
+     * (overview가 비어있으면 재사용하지 않으므로, 컬럼 신규 추가 후 최초 전량 채우기가 정상 동작한다.)
      */
     private String resolveOverview(Item item, Map<String, TourismInfo> existingByContentId, int[] counters) {
         TourismInfo existing = existingByContentId.get(item.getContentid());
-        if (existing != null && java.util.Objects.equals(existing.getModifiedTime(), item.getModifiedtime())) {
+        if (existing != null
+                && existing.getOverview() != null && !existing.getOverview().isBlank()
+                && java.util.Objects.equals(existing.getModifiedTime(), item.getModifiedtime())) {
             counters[0]++;
             return existing.getOverview();
         }
