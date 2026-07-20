@@ -214,7 +214,7 @@ public class ApiSyncBatchConfig {
                 .imageUrl(SyncDataTransformer.resolveImageUrl(info.getFirstImage(), info.getFirstImage2()))
                 .lat(SyncDataTransformer.parseCoordinate(info.getMapy()))
                 .lng(SyncDataTransformer.parseCoordinate(info.getMapx()))
-                .description(info.getTitle() != null ? info.getTitle().trim() + " 관광지 정보입니다." : "")
+                .description(SyncDataTransformer.resolveDescription(info.getOverview(), info.getTitle()))
                 .last7DaysDetailViewCount(0)
                 .monthlyDetailViewCount(0)
                 .monthlyAverageCongestionScore(0)
@@ -234,7 +234,7 @@ public class ApiSyncBatchConfig {
         place.setImageUrl(SyncDataTransformer.resolveImageUrl(info.getFirstImage(), info.getFirstImage2()));
         place.setLat(SyncDataTransformer.parseCoordinate(info.getMapy()));
         place.setLng(SyncDataTransformer.parseCoordinate(info.getMapx()));
-        place.setDescription(info.getTitle() != null ? info.getTitle().trim() + " 관광지 정보입니다." : place.getDescription());
+        place.setDescription(SyncDataTransformer.resolveDescription(info.getOverview(), info.getTitle()));
         place.setActive(true);
         place.setUpdatedAt(now);
     }

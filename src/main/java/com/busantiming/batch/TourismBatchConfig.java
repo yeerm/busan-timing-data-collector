@@ -15,8 +15,10 @@ import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import java.sql.Date;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -28,12 +30,18 @@ import java.util.Map;
 @Configuration
 public class TourismBatchConfig {
 
+    private static final int BATCH_SIZE = 500;
+
     private final TourismApiService tourismApiService;
     private final TourismPredictionRepository repository;
+    private final JdbcTemplate jdbcTemplate;
 
-    public TourismBatchConfig(TourismApiService tourismApiService, TourismPredictionRepository repository) {
+    public TourismBatchConfig(TourismApiService tourismApiService,
+                              TourismPredictionRepository repository,
+                              JdbcTemplate jdbcTemplate) {
         this.tourismApiService = tourismApiService;
         this.repository = repository;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Bean
@@ -108,11 +116,41 @@ public class TourismBatchConfig {
 
             log.info("전체 수집 완료: {}건. 기존 데이터 삭제 후 새 데이터를 저장합니다.", predictions.size());
             repository.deleteAllInBatch();
-            repository.saveAll(predictions);
+            bulkInsert(predictions);
             log.info("데이터 교체 완료: {}건 저장", predictions.size());
 
             return RepeatStatus.FINISHED;
         };
+    }
+
+    /**
+     * IDENTITY 전략 엔티티는 saveAll 시 행 단위 INSERT 왕복이 발생해 대량 저장이 매우 느리다.
+     * (원격 DB 기준 수천 건이면 십수 분 소요 → 배치 타임아웃 유발)
+     * jdbcTemplate.batchUpdate로 벌크 인서트하여 왕복 횟수를 줄인다.
+     */
+    private void bulkInsert(List<TourismPrediction> predictions) {
+        String sql = """
+                INSERT INTO public.tourism_concentration
+                    (base_ymd, area_cd, area_nm, signgu_cd, signgu_nm, tour_attraction_name, cnctr_rate, collected_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, now())
+                """;
+
+        List<Object[]> params = predictions.stream()
+                .map(p -> new Object[]{
+                        Date.valueOf(p.getBaseYmd()),
+                        p.getAreaCd(),
+                        p.getAreaNm(),
+                        p.getSignguCd(),
+                        p.getSignguNm(),
+                        p.getTourAttractionName(),
+                        p.getCnctrRate()
+                })
+                .toList();
+
+        for (int i = 0; i < params.size(); i += BATCH_SIZE) {
+            List<Object[]> batch = params.subList(i, Math.min(i + BATCH_SIZE, params.size()));
+            jdbcTemplate.batchUpdate(sql, batch);
+        }
     }
 
     private Double parseDouble(String value) {

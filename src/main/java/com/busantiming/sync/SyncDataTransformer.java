@@ -62,6 +62,16 @@ public final class SyncDataTransformer {
         return DEFAULT_IMAGE_URL;
     }
 
+    public static String resolveDescription(String overview, String title) {
+        if (overview != null && !overview.isBlank()) {
+            return overview.trim();
+        }
+        if (title != null) {
+            return title.trim() + " 관광지 정보입니다.";
+        }
+        return "";
+    }
+
     public static double parseCoordinate(String value) {
         if (value == null || value.isBlank()) return 0.0;
         try {
