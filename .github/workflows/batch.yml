@@ -19,9 +19,7 @@ on:
 jobs:
   run-batch:
     runs-on: ubuntu-latest
-    # overview 최초 전량 수집(detailCommon2 ~2,300건 순차 호출) 완주를 위해 일시 상향.
-    # 캐시가 채워진 이후에는 신규/변경분만 호출하므로 15분으로 되돌려도 됨.
-    timeout-minutes: 40
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
