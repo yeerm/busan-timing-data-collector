@@ -22,12 +22,18 @@ import org.springframework.transaction.PlatformTransactionManager;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Configuration
 public class TourismInfoBatchConfig {
+
+    // overview 조회 대상에서 제외하는 콘텐츠 타입: 레포츠(28)·숙박(32)·쇼핑(38)·음식점(39).
+    // 실제 서비스에서 설명을 활용하는 관광지(12)·문화시설(14)·축제(15)·여행코스(25)만 조회한다.
+    private static final Set<String> OVERVIEW_EXCLUDED_TYPES = Set.of("28", "32", "38", "39");
 
     private final TourismInfoApiService tourismInfoApiService;
     private final TourismInfoRepository repository;
@@ -69,7 +75,7 @@ public class TourismInfoBatchConfig {
                     .collect(Collectors.toMap(TourismInfo::getContentId, Function.identity(), (a, b) -> a));
 
             LocalDateTime now = LocalDateTime.now();
-            int[] counters = new int[2]; // [0]=캐시재사용, [1]=신규조회
+            int[] counters = new int[3]; // [0]=캐시재사용, [1]=신규조회, [2]=미대상스킵
             List<TourismInfo> tourismInfoList = items.stream()
                     .map(item -> TourismInfo.builder()
                             .contentId(item.getContentid())
@@ -92,7 +98,8 @@ public class TourismInfoBatchConfig {
                             .build())
                     .toList();
 
-            log.info("overview 처리 완료: 캐시 재사용 {}건, detailCommon2 신규 조회 {}건", counters[0], counters[1]);
+            log.info("overview 처리 완료: 캐시 재사용 {}건, detailCommon2 신규 조회 {}건, 미대상 스킵 {}건",
+                    counters[0], counters[1], counters[2]);
             log.info("수집 완료: {}건. 기존 데이터 삭제 후 새 데이터를 저장합니다.", tourismInfoList.size());
             repository.deleteAllInBatch();
             repository.saveAll(tourismInfoList);
@@ -110,9 +117,16 @@ public class TourismInfoBatchConfig {
      */
     private String resolveOverview(Item item, Map<String, TourismInfo> existingByContentId, int[] counters) {
         TourismInfo existing = existingByContentId.get(item.getContentid());
+
+        // 활용하지 않는 카테고리는 API 호출 없이 기존 값 유지(대개 null → description은 fallback 문구)
+        if (OVERVIEW_EXCLUDED_TYPES.contains(item.getContenttypeid())) {
+            counters[2]++;
+            return existing != null ? existing.getOverview() : null;
+        }
+
         if (existing != null
                 && existing.getOverview() != null && !existing.getOverview().isBlank()
-                && java.util.Objects.equals(existing.getModifiedTime(), item.getModifiedtime())) {
+                && Objects.equals(existing.getModifiedTime(), item.getModifiedtime())) {
             counters[0]++;
             return existing.getOverview();
         }
