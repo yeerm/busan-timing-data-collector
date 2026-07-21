@@ -1,6 +1,7 @@
 package com.busantiming.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
 import lombok.Getter;
@@ -74,7 +75,9 @@ public class FestivalResponse {
         private String mapy;
         private String tel;
         private String title;
+        @JsonProperty("lDongRegnCd")
         private String lDongRegnCd;
+        @JsonProperty("lDongSignguCd")
         private String lDongSignguCd;
     }
 }
