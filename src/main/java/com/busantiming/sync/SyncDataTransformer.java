@@ -72,6 +72,17 @@ public final class SyncDataTransformer {
         return "";
     }
 
+    /**
+     * TourAPI의 시도코드(lDongRegnCd, 예 26)와 시군구코드(lDongSignguCd, 예 440)를 합쳐
+     * 5자리 구코드(26440)를 만든다. 둘 중 하나라도 비어있으면 null을 반환한다.
+     */
+    public static String combineDistrictCode(String regnCd, String signguCd) {
+        if (regnCd == null || regnCd.isBlank() || signguCd == null || signguCd.isBlank()) {
+            return null;
+        }
+        return regnCd.trim() + signguCd.trim();
+    }
+
     private static final java.time.format.DateTimeFormatter YYYYMMDD =
             java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
 

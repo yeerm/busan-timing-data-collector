@@ -180,6 +180,20 @@ class SyncDataTransformerTest {
     }
 
     @Test
+    void combineDistrictCode_combinesRegnAndSigngu() {
+        assertEquals("26440", SyncDataTransformer.combineDistrictCode("26", "440"));
+        assertEquals("26440", SyncDataTransformer.combineDistrictCode(" 26 ", " 440 "));
+    }
+
+    @Test
+    void combineDistrictCode_nullWhenEitherMissing() {
+        assertNull(SyncDataTransformer.combineDistrictCode(null, "440"));
+        assertNull(SyncDataTransformer.combineDistrictCode("26", null));
+        assertNull(SyncDataTransformer.combineDistrictCode("26", ""));
+        assertNull(SyncDataTransformer.combineDistrictCode("", "440"));
+    }
+
+    @Test
     void parseYyyyMmDd_invalidReturnsNull() {
         assertNull(SyncDataTransformer.parseYyyyMmDd(null));
         assertNull(SyncDataTransformer.parseYyyyMmDd(""));

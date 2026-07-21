@@ -259,18 +259,25 @@ public class ApiSyncBatchConfig {
 
                 boolean active = !endDate.isBefore(today);
                 String name = festival.getTitle() != null ? festival.getTitle().trim() : place.getName();
-                upsertParams.add(new Object[]{place.getId(), name, Date.valueOf(startDate), Date.valueOf(endDate), active});
+                // 구코드: 축제 원본의 시도+시군구 코드 결합(26+440=26440), 없으면 매칭된 place의 값 사용
+                String districtCode = SyncDataTransformer.combineDistrictCode(
+                        festival.getLDongRegnCd(), festival.getLDongSignguCd());
+                if (districtCode == null) {
+                    districtCode = place.getDistrictCode();
+                }
+                upsertParams.add(new Object[]{place.getId(), name, Date.valueOf(startDate), Date.valueOf(endDate), active, districtCode});
             }
 
             String sql = """
                     INSERT INTO busan_timing_api.place_festivals
-                        (place_id, name, start_date, end_date, active, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, now(), now())
+                        (place_id, name, start_date, end_date, active, district_code, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, now(), now())
                     ON CONFLICT (place_id)
                     DO UPDATE SET name = EXCLUDED.name,
                                   start_date = EXCLUDED.start_date,
                                   end_date = EXCLUDED.end_date,
                                   active = EXCLUDED.active,
+                                  district_code = EXCLUDED.district_code,
                                   updated_at = now()
                     """;
 
