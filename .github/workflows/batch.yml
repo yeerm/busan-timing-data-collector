@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: '0 15 * * *'   # tourismPredictionJob - 매일 00:00 KST
     - cron: '30 15 * * 0'  # tourismInfoJob - 매주 월요일 00:30 KST (UTC 기준 일요일)
+    - cron: '45 15 * * 0'  # festivalInfoJob - 매주 월요일 00:45 KST (UTC 기준 일요일)
     - cron: '0 16 * * *'   # apiSyncJob - 매일 01:00 KST
   workflow_dispatch:
     inputs:
@@ -14,6 +15,7 @@ on:
         options:
           - tourismPredictionJob
           - tourismInfoJob
+          - festivalInfoJob
           - apiSyncJob
 
 jobs:
@@ -40,6 +42,8 @@ jobs:
             echo "name=tourismPredictionJob" >> $GITHUB_OUTPUT
           elif [ "${{ github.event.schedule }}" == "30 15 * * 0" ]; then
             echo "name=tourismInfoJob" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" == "45 15 * * 0" ]; then
+            echo "name=festivalInfoJob" >> $GITHUB_OUTPUT
           elif [ "${{ github.event.schedule }}" == "0 16 * * *" ]; then
             echo "name=apiSyncJob" >> $GITHUB_OUTPUT
           fi

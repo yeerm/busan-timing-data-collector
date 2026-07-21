@@ -172,4 +172,19 @@ class SyncDataTransformerTest {
         assertEquals("", SyncDataTransformer.resolveDescription(null, null));
         assertEquals("", SyncDataTransformer.resolveDescription("", null));
     }
+
+    @Test
+    void parseYyyyMmDd_validDate() {
+        assertEquals(java.time.LocalDate.of(2026, 4, 3), SyncDataTransformer.parseYyyyMmDd("20260403"));
+        assertEquals(java.time.LocalDate.of(2026, 12, 31), SyncDataTransformer.parseYyyyMmDd(" 20261231 "));
+    }
+
+    @Test
+    void parseYyyyMmDd_invalidReturnsNull() {
+        assertNull(SyncDataTransformer.parseYyyyMmDd(null));
+        assertNull(SyncDataTransformer.parseYyyyMmDd(""));
+        assertNull(SyncDataTransformer.parseYyyyMmDd("2026"));
+        assertNull(SyncDataTransformer.parseYyyyMmDd("invalid"));
+        assertNull(SyncDataTransformer.parseYyyyMmDd("20261340"));
+    }
 }

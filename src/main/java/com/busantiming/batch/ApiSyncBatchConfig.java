@@ -1,5 +1,7 @@
 package com.busantiming.batch;
 
+import com.busantiming.domain.FestivalInfo;
+import com.busantiming.domain.FestivalInfoRepository;
 import com.busantiming.domain.TourismInfo;
 import com.busantiming.domain.TourismInfoRepository;
 import com.busantiming.domain.TourismPrediction;
@@ -35,6 +37,7 @@ public class ApiSyncBatchConfig {
     private final SyncPlaceRepository syncPlaceRepository;
     private final SyncCongestionForecastRepository syncCongestionForecastRepository;
     private final ContentTypeMappingRepository contentTypeMappingRepository;
+    private final FestivalInfoRepository festivalInfoRepository;
     private final JdbcTemplate jdbcTemplate;
 
     private static final int BATCH_SIZE = 500;
@@ -44,21 +47,25 @@ public class ApiSyncBatchConfig {
                               SyncPlaceRepository syncPlaceRepository,
                               SyncCongestionForecastRepository syncCongestionForecastRepository,
                               ContentTypeMappingRepository contentTypeMappingRepository,
+                              FestivalInfoRepository festivalInfoRepository,
                               JdbcTemplate jdbcTemplate) {
         this.tourismInfoRepository = tourismInfoRepository;
         this.tourismPredictionRepository = tourismPredictionRepository;
         this.syncPlaceRepository = syncPlaceRepository;
         this.syncCongestionForecastRepository = syncCongestionForecastRepository;
         this.contentTypeMappingRepository = contentTypeMappingRepository;
+        this.festivalInfoRepository = festivalInfoRepository;
         this.jdbcTemplate = jdbcTemplate;
     }
 
     @Bean
-    public Job apiSyncJob(JobRepository jobRepository, Step syncPlacesStep, Step syncCongestionForecastsStep) {
+    public Job apiSyncJob(JobRepository jobRepository, Step syncPlacesStep,
+                          Step syncCongestionForecastsStep, Step syncFestivalsStep) {
         return new JobBuilder("apiSyncJob", jobRepository)
                 .incrementer(new RunIdIncrementer())
                 .start(syncPlacesStep)
                 .next(syncCongestionForecastsStep)
+                .next(syncFestivalsStep)
                 .listener(new TourismJobListener())
                 .build();
     }
@@ -74,6 +81,13 @@ public class ApiSyncBatchConfig {
     public Step syncCongestionForecastsStep(JobRepository jobRepository, PlatformTransactionManager transactionManager) {
         return new StepBuilder("syncCongestionForecastsStep", jobRepository)
                 .tasklet(syncCongestionForecastsTasklet(), transactionManager)
+                .build();
+    }
+
+    @Bean
+    public Step syncFestivalsStep(JobRepository jobRepository, PlatformTransactionManager transactionManager) {
+        return new StepBuilder("syncFestivalsStep", jobRepository)
+                .tasklet(syncFestivalsTasklet(), transactionManager)
                 .build();
     }
 
@@ -197,6 +211,76 @@ public class ApiSyncBatchConfig {
             syncPlaceRepository.updateMonthlyAverageCongestionScores();
 
             log.info("congestion_forecasts 동기화 완료: 매칭성공={}건, 매칭실패={}건", upsertParams.size(), unmatchedCount);
+
+            return RepeatStatus.FINISHED;
+        };
+    }
+
+    @Bean
+    public Tasklet syncFestivalsTasklet() {
+        return (contribution, chunkContext) -> {
+            log.info("public.festival_info → busan_timing_api.place_festivals 동기화 시작");
+
+            List<FestivalInfo> festivals = festivalInfoRepository.findAll();
+            if (festivals.isEmpty()) {
+                log.warn("festival_info 데이터가 없습니다. 축제 동기화를 건너뜁니다.");
+                return RepeatStatus.FINISHED;
+            }
+
+            Map<String, SyncPlace> placeByContentId = syncPlaceRepository.findAll().stream()
+                    .filter(p -> p.getContentId() != null)
+                    .collect(Collectors.toMap(SyncPlace::getContentId, Function.identity(), (a, b) -> a));
+
+            LocalDate today = LocalDate.now();
+            List<Object[]> upsertParams = new ArrayList<>();
+            int unmatchedCount = 0;
+            int invalidDateCount = 0;
+
+            for (FestivalInfo festival : festivals) {
+                if (festival.getContentId() == null) continue;
+
+                SyncPlace place = placeByContentId.get(festival.getContentId());
+                if (place == null) {
+                    unmatchedCount++;
+                    log.warn("[SKIP] contentId={}, {} - places에 매칭되는 관광지 없음",
+                            festival.getContentId(), festival.getTitle());
+                    continue;
+                }
+
+                LocalDate startDate = SyncDataTransformer.parseYyyyMmDd(festival.getEventStartDate());
+                LocalDate endDate = SyncDataTransformer.parseYyyyMmDd(festival.getEventEndDate());
+                if (startDate == null || endDate == null) {
+                    invalidDateCount++;
+                    log.warn("[SKIP] contentId={}, {} - 행사 기간 파싱 실패(start={}, end={})",
+                            festival.getContentId(), festival.getTitle(),
+                            festival.getEventStartDate(), festival.getEventEndDate());
+                    continue;
+                }
+
+                boolean active = !endDate.isBefore(today);
+                String name = festival.getTitle() != null ? festival.getTitle().trim() : place.getName();
+                upsertParams.add(new Object[]{place.getId(), name, Date.valueOf(startDate), Date.valueOf(endDate), active});
+            }
+
+            String sql = """
+                    INSERT INTO busan_timing_api.place_festivals
+                        (place_id, name, start_date, end_date, active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, now(), now())
+                    ON CONFLICT (place_id)
+                    DO UPDATE SET name = EXCLUDED.name,
+                                  start_date = EXCLUDED.start_date,
+                                  end_date = EXCLUDED.end_date,
+                                  active = EXCLUDED.active,
+                                  updated_at = now()
+                    """;
+
+            for (int i = 0; i < upsertParams.size(); i += BATCH_SIZE) {
+                List<Object[]> batch = upsertParams.subList(i, Math.min(i + BATCH_SIZE, upsertParams.size()));
+                jdbcTemplate.batchUpdate(sql, batch);
+            }
+
+            log.info("place_festivals 동기화 완료: upsert={}건, 매칭실패={}건, 기간오류={}건",
+                    upsertParams.size(), unmatchedCount, invalidDateCount);
 
             return RepeatStatus.FINISHED;
         };

@@ -72,6 +72,22 @@ public final class SyncDataTransformer {
         return "";
     }
 
+    private static final java.time.format.DateTimeFormatter YYYYMMDD =
+            java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /**
+     * TourAPI의 yyyyMMdd 문자열(예: eventstartdate)을 LocalDate로 파싱한다.
+     * null/공백/형식오류면 null을 반환한다.
+     */
+    public static java.time.LocalDate parseYyyyMmDd(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return java.time.LocalDate.parse(value.trim(), YYYYMMDD);
+        } catch (java.time.format.DateTimeParseException e) {
+            return null;
+        }
+    }
+
     public static double parseCoordinate(String value) {
         if (value == null || value.isBlank()) return 0.0;
         try {
