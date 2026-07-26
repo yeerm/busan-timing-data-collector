@@ -2,6 +2,8 @@ package com.busantiming.batch;
 
 import com.busantiming.domain.FestivalInfo;
 import com.busantiming.domain.FestivalInfoRepository;
+import com.busantiming.domain.RelatedPlace;
+import com.busantiming.domain.RelatedPlaceRepository;
 import com.busantiming.domain.TourismInfo;
 import com.busantiming.domain.TourismInfoRepository;
 import com.busantiming.domain.TourismPrediction;
@@ -38,6 +40,7 @@ public class ApiSyncBatchConfig {
     private final SyncCongestionForecastRepository syncCongestionForecastRepository;
     private final ContentTypeMappingRepository contentTypeMappingRepository;
     private final FestivalInfoRepository festivalInfoRepository;
+    private final RelatedPlaceRepository relatedPlaceRepository;
     private final JdbcTemplate jdbcTemplate;
 
     private static final int BATCH_SIZE = 500;
@@ -48,6 +51,7 @@ public class ApiSyncBatchConfig {
                               SyncCongestionForecastRepository syncCongestionForecastRepository,
                               ContentTypeMappingRepository contentTypeMappingRepository,
                               FestivalInfoRepository festivalInfoRepository,
+                              RelatedPlaceRepository relatedPlaceRepository,
                               JdbcTemplate jdbcTemplate) {
         this.tourismInfoRepository = tourismInfoRepository;
         this.tourismPredictionRepository = tourismPredictionRepository;
@@ -55,17 +59,20 @@ public class ApiSyncBatchConfig {
         this.syncCongestionForecastRepository = syncCongestionForecastRepository;
         this.contentTypeMappingRepository = contentTypeMappingRepository;
         this.festivalInfoRepository = festivalInfoRepository;
+        this.relatedPlaceRepository = relatedPlaceRepository;
         this.jdbcTemplate = jdbcTemplate;
     }
 
     @Bean
     public Job apiSyncJob(JobRepository jobRepository, Step syncPlacesStep,
-                          Step syncCongestionForecastsStep, Step syncFestivalsStep) {
+                          Step syncCongestionForecastsStep, Step syncFestivalsStep,
+                          Step syncRelatedPlacesStep) {
         return new JobBuilder("apiSyncJob", jobRepository)
                 .incrementer(new RunIdIncrementer())
                 .start(syncPlacesStep)
                 .next(syncCongestionForecastsStep)
                 .next(syncFestivalsStep)
+                .next(syncRelatedPlacesStep)
                 .listener(new TourismJobListener())
                 .build();
     }
@@ -291,6 +298,75 @@ public class ApiSyncBatchConfig {
 
             return RepeatStatus.FINISHED;
         };
+    }
+
+    @Bean
+    public Step syncRelatedPlacesStep(JobRepository jobRepository, PlatformTransactionManager transactionManager) {
+        return new StepBuilder("syncRelatedPlacesStep", jobRepository)
+                .tasklet(syncRelatedPlacesTasklet(), transactionManager)
+                .build();
+    }
+
+    @Bean
+    public Tasklet syncRelatedPlacesTasklet() {
+        return (contribution, chunkContext) -> {
+            log.info("public.related_place → busan_timing_api.related_places 동기화 시작");
+
+            List<RelatedPlace> rows = relatedPlaceRepository.findAll();
+            if (rows.isEmpty()) {
+                log.warn("related_place 데이터가 없습니다. 연관관광지 동기화를 건너뜁니다.");
+                return RepeatStatus.FINISHED;
+            }
+
+            PlaceIdResolver resolver = new PlaceIdResolver(syncPlaceRepository.findAll());
+
+            // (place_id, related_place_id) 중복 제거를 위해 첫 등장(=상위 rank) 값만 유지
+            Map<String, Object[]> byKey = new LinkedHashMap<>();
+            int unmatched = 0;
+            int selfRef = 0;
+
+            for (RelatedPlace r : rows) {
+                Optional<Long> baseId = resolver.resolve(r.getTAtsNm(), r.getSignguCd());
+                Optional<Long> relatedId = resolver.resolve(r.getRlteTatsNm(), r.getRlteSignguCd());
+                if (baseId.isEmpty() || relatedId.isEmpty()) {
+                    unmatched++;
+                    continue;
+                }
+                if (baseId.get().equals(relatedId.get())) {
+                    selfRef++;
+                    continue;
+                }
+                int rank = parseRank(r.getRlteRank());
+                String key = baseId.get() + ":" + relatedId.get();
+                byKey.putIfAbsent(key, new Object[]{baseId.get(), relatedId.get(), rank});
+            }
+
+            jdbcTemplate.update("DELETE FROM busan_timing_api.related_places");
+
+            String sql = """
+                    INSERT INTO busan_timing_api.related_places
+                        (place_id, related_place_id, rlte_rank, created_at, updated_at)
+                    VALUES (?, ?, ?, now(), now())
+                    ON CONFLICT (place_id, related_place_id)
+                    DO UPDATE SET rlte_rank = EXCLUDED.rlte_rank, updated_at = now()
+                    """;
+            List<Object[]> params = new ArrayList<>(byKey.values());
+            for (int i = 0; i < params.size(); i += BATCH_SIZE) {
+                jdbcTemplate.batchUpdate(sql, params.subList(i, Math.min(i + BATCH_SIZE, params.size())));
+            }
+
+            log.info("related_places 동기화 완료: upsert={}건, 매칭실패={}건, 자기참조={}건",
+                    params.size(), unmatched, selfRef);
+            return RepeatStatus.FINISHED;
+        };
+    }
+
+    private static int parseRank(String rank) {
+        try {
+            return rank == null ? 0 : Integer.parseInt(rank.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private SyncPlace createPlace(TourismInfo info, int contentTypeId, LocalDateTime now) {

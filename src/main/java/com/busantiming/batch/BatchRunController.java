@@ -20,15 +20,18 @@ public class BatchRunController {
     private final Job tourismPredictionJob;
     private final Job tourismInfoJob;
     private final Job apiSyncJob;
+    private final Job relatedPlaceJob;
 
     public BatchRunController(JobLauncher jobLauncher,
                               @Qualifier("tourismPredictionJob") Job tourismPredictionJob,
                               @Qualifier("tourismInfoJob") Job tourismInfoJob,
-                              @Qualifier("apiSyncJob") Job apiSyncJob) {
+                              @Qualifier("apiSyncJob") Job apiSyncJob,
+                              @Qualifier("relatedPlaceJob") Job relatedPlaceJob) {
         this.jobLauncher = jobLauncher;
         this.tourismPredictionJob = tourismPredictionJob;
         this.tourismInfoJob = tourismInfoJob;
         this.apiSyncJob = apiSyncJob;
+        this.relatedPlaceJob = relatedPlaceJob;
     }
 
     @PostMapping("/run")
@@ -44,6 +47,11 @@ public class BatchRunController {
     @PostMapping("/run/api-sync")
     public ResponseEntity<Map<String, String>> runApiSyncBatch() {
         return runJob(apiSyncJob, "API 동기화 배치");
+    }
+
+    @PostMapping("/run/related-place")
+    public ResponseEntity<Map<String, String>> runRelatedPlaceBatch() {
+        return runJob(relatedPlaceJob, "연관관광지 수집 배치");
     }
 
     private ResponseEntity<Map<String, String>> runJob(Job job, String jobName) {

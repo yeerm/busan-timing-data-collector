@@ -58,4 +58,8 @@ public final class BusanDistrictCode {
     public static boolean isValidName(String districtName) {
         return districtName != null && NAME_TO_CODE.containsKey(districtName);
     }
+
+    public static java.util.Set<String> allCodes() {
+        return CODE_TO_NAME.keySet();
+    }
 }
