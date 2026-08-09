@@ -53,6 +53,7 @@ public final class SyncDataTransformer {
 
         if (!hasAddr1 && !hasAddr2) return "주소 정보 없음";
         if (!hasAddr2) return addr1.trim();
+        if (!hasAddr1) return addr2.trim();
         return addr1.trim() + " " + addr2.trim();
     }
 

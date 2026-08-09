@@ -272,19 +272,22 @@ public class ApiSyncBatchConfig {
                 if (districtCode == null) {
                     districtCode = place.getDistrictCode();
                 }
-                upsertParams.add(new Object[]{place.getId(), name, Date.valueOf(startDate), Date.valueOf(endDate), active, districtCode});
+                // 축제 장소 주소: 원본 addr1 + addr2 조합(둘 다 없으면 "주소 정보 없음")
+                String placeAddress = SyncDataTransformer.buildAddress(festival.getAddr1(), festival.getAddr2());
+                upsertParams.add(new Object[]{place.getId(), name, Date.valueOf(startDate), Date.valueOf(endDate), active, districtCode, placeAddress});
             }
 
             String sql = """
                     INSERT INTO busan_timing_api.place_festivals
-                        (place_id, name, start_date, end_date, active, district_code, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, now(), now())
+                        (place_id, name, start_date, end_date, active, district_code, place_address, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, now(), now())
                     ON CONFLICT (place_id)
                     DO UPDATE SET name = EXCLUDED.name,
                                   start_date = EXCLUDED.start_date,
                                   end_date = EXCLUDED.end_date,
                                   active = EXCLUDED.active,
                                   district_code = EXCLUDED.district_code,
+                                  place_address = EXCLUDED.place_address,
                                   updated_at = now()
                     """;
 

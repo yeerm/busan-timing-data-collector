@@ -110,6 +110,12 @@ class SyncDataTransformerTest {
     }
 
     @Test
+    void buildAddress_addr2Only() {
+        assertEquals("벡스코", SyncDataTransformer.buildAddress(null, "벡스코"));
+        assertEquals("벡스코", SyncDataTransformer.buildAddress("", "벡스코"));
+    }
+
+    @Test
     void buildAddress_nonePresent() {
         assertEquals("주소 정보 없음", SyncDataTransformer.buildAddress(null, null));
         assertEquals("주소 정보 없음", SyncDataTransformer.buildAddress("", ""));
