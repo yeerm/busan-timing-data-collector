@@ -1,0 +1,53 @@
+name: DB Connectivity Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Check database connection
+        env:
+          SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
+          PGPASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+        run: |
+          python3 - <<'PY' > /tmp/db.env
+          import os
+          import re
+          import sys
+
+          url = os.environ.get("SPRING_DATASOURCE_URL", "")
+          match = re.match(r"jdbc:postgresql://([^:/?]+)(?::([0-9]+))?/([^?]+)", url)
+          if not match:
+              sys.exit("Invalid SPRING_DATASOURCE_URL format")
+
+          host, port, database = match.group(1), match.group(2) or "5432", match.group(3)
+          print(f"PGHOST={host}")
+          print(f"PGPORT={port}")
+          print(f"PGDATABASE={database}")
+          PY
+
+          set -a
+          . /tmp/db.env
+          set +a
+
+          pg_isready \
+            --host "$PGHOST" \
+            --port "$PGPORT" \
+            --dbname "$PGDATABASE" \
+            --username "$SPRING_DATASOURCE_USERNAME"
+
+          psql \
+            --host "$PGHOST" \
+            --port "$PGPORT" \
+            --dbname "$PGDATABASE" \
+            --username "$SPRING_DATASOURCE_USERNAME" \
+            --command "select 1;"
