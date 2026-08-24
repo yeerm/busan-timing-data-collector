@@ -77,22 +77,22 @@ class SyncDataTransformerTest {
     }
 
     @Test
-    void clampCongestionScore_normalValues() {
-        assertEquals(65, SyncDataTransformer.clampCongestionScore(65.0));
-        assertEquals(66, SyncDataTransformer.clampCongestionScore(65.5));
-        assertEquals(0, SyncDataTransformer.clampCongestionScore(0.0));
-        assertEquals(100, SyncDataTransformer.clampCongestionScore(100.0));
+    void congestionScore_keepsOriginalDecimalValues() {
+        assertEquals(65.0, SyncDataTransformer.congestionScore(65.0));
+        assertEquals(65.5, SyncDataTransformer.congestionScore(65.5));
+        assertEquals(0.0, SyncDataTransformer.congestionScore(0.0));
+        assertEquals(100.25, SyncDataTransformer.congestionScore(100.25));
     }
 
     @Test
-    void clampCongestionScore_clampsOutOfRange() {
-        assertEquals(100, SyncDataTransformer.clampCongestionScore(150.0));
-        assertEquals(0, SyncDataTransformer.clampCongestionScore(-10.0));
+    void congestionScore_doesNotClampOutOfRangeValues() {
+        assertEquals(150.25, SyncDataTransformer.congestionScore(150.25));
+        assertEquals(-10.75, SyncDataTransformer.congestionScore(-10.75));
     }
 
     @Test
-    void clampCongestionScore_nullReturnsNull() {
-        assertNull(SyncDataTransformer.clampCongestionScore(null));
+    void congestionScore_nullReturnsNull() {
+        assertNull(SyncDataTransformer.congestionScore(null));
     }
 
     @Test

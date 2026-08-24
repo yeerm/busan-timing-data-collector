@@ -18,5 +18,5 @@ public interface SyncCongestionForecastRepository extends JpaRepository<SyncCong
             """, nativeQuery = true)
     void upsert(@Param("placeId") Long placeId,
                 @Param("forecastDate") LocalDate forecastDate,
-                @Param("congestionScore") int congestionScore);
+                @Param("congestionScore") double congestionScore);
 }

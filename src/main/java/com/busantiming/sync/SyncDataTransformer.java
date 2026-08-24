@@ -41,10 +41,8 @@ public final class SyncDataTransformer {
         return CATEGORY_MAP.getOrDefault(contentTypeId, "기타");
     }
 
-    public static Integer clampCongestionScore(Double cnctrRate) {
-        if (cnctrRate == null) return null;
-        int rounded = (int) Math.round(cnctrRate);
-        return Math.max(0, Math.min(100, rounded));
+    public static Double congestionScore(Double cnctrRate) {
+        return cnctrRate;
     }
 
     public static String buildAddress(String addr1, String addr2) {

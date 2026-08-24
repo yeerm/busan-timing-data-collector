@@ -26,7 +26,7 @@ public class SyncCongestionForecast {
     private LocalDate forecastDate;
 
     @Column(name = "congestion_score", nullable = false)
-    private int congestionScore;
+    private double congestionScore;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;

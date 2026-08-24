@@ -192,7 +192,7 @@ public class ApiSyncBatchConfig {
                 SyncPlace place = placeByContentId.get(matched.getContentId());
                 if (place == null) continue;
 
-                Integer score = SyncDataTransformer.clampCongestionScore(prediction.getCnctrRate());
+                Double score = SyncDataTransformer.congestionScore(prediction.getCnctrRate());
                 if (score == null) continue;
 
                 upsertParams.add(new Object[]{place.getId(), Date.valueOf(prediction.getBaseYmd()), score});
