@@ -10,10 +10,12 @@ import java.util.stream.Collectors;
  */
 public class PlaceIdResolver {
 
+    private final List<SyncPlace> places;
     private final Map<String, List<SyncPlace>> byNormalizedName;
 
     public PlaceIdResolver(List<SyncPlace> places) {
-        this.byNormalizedName = places.stream()
+        this.places = List.copyOf(places);
+        this.byNormalizedName = this.places.stream()
                 .filter(p -> p.getName() != null)
                 .collect(Collectors.groupingBy(p -> SyncDataTransformer.normalizeForMatching(p.getName())));
     }
@@ -27,5 +29,52 @@ public class PlaceIdResolver {
                 .filter(p -> Objects.equals(p.getDistrictCode(), districtCode))
                 .map(SyncPlace::getId)
                 .findFirst();
+    }
+
+    public Optional<Long> resolveFestivalVenue(String address, String districtCode) {
+        if (address == null || address.isBlank()) return Optional.empty();
+
+        String normalizedAddress = normalizeAddress(address);
+        if (normalizedAddress.isBlank()) return Optional.empty();
+
+        List<SyncPlace> candidates = places.stream()
+                .filter(p -> Objects.equals(p.getDistrictCode(), districtCode))
+                .filter(p -> p.getContentTypeId() != 15)
+                .toList();
+
+        Optional<Long> byNameInAddress = candidates.stream()
+                .filter(p -> containsNormalized(normalizedAddress, p.getName()))
+                .sorted(Comparator
+                        .comparingInt((SyncPlace p) -> SyncDataTransformer.normalizeForMatching(p.getName()).length())
+                        .reversed()
+                        .thenComparing(SyncPlace::getId))
+                .map(SyncPlace::getId)
+                .findFirst();
+        if (byNameInAddress.isPresent()) return byNameInAddress;
+
+        return candidates.stream()
+                .filter(p -> addressOverlaps(normalizedAddress, p.getAddress()))
+                .sorted(Comparator.comparing(SyncPlace::getId))
+                .map(SyncPlace::getId)
+                .findFirst();
+    }
+
+    private static boolean containsNormalized(String normalizedText, String value) {
+        if (value == null || value.isBlank()) return false;
+        String normalizedValue = SyncDataTransformer.normalizeForMatching(value);
+        return !normalizedValue.isBlank() && normalizedText.contains(normalizedValue);
+    }
+
+    private static boolean addressOverlaps(String normalizedAddress, String placeAddress) {
+        if (placeAddress == null || placeAddress.isBlank()) return false;
+        String normalizedPlaceAddress = normalizeAddress(placeAddress);
+        return !normalizedPlaceAddress.isBlank()
+                && (normalizedAddress.contains(normalizedPlaceAddress)
+                || normalizedPlaceAddress.contains(normalizedAddress));
+    }
+
+    private static String normalizeAddress(String address) {
+        return SyncDataTransformer.normalizeForMatching(address)
+                .replace("일원", "");
     }
 }

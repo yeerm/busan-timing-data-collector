@@ -234,25 +234,20 @@ public class ApiSyncBatchConfig {
                 return RepeatStatus.FINISHED;
             }
 
-            Map<String, SyncPlace> placeByContentId = syncPlaceRepository.findAll().stream()
-                    .filter(p -> p.getContentId() != null)
-                    .collect(Collectors.toMap(SyncPlace::getContentId, Function.identity(), (a, b) -> a));
+            List<SyncPlace> places = syncPlaceRepository.findAll();
+            PlaceIdResolver placeIdResolver = new PlaceIdResolver(places);
+            Map<String, String> districtCodeByDistrictName = places.stream()
+                    .filter(p -> p.getDistrictName() != null && p.getDistrictCode() != null)
+                    .collect(Collectors.toMap(SyncPlace::getDistrictName, SyncPlace::getDistrictCode, (a, b) -> a));
 
             LocalDate today = LocalDate.now();
             List<Object[]> upsertParams = new ArrayList<>();
-            int unmatchedCount = 0;
+            int unmatchedVenueCount = 0;
             int invalidDateCount = 0;
+            int invalidDistrictCount = 0;
 
             for (FestivalInfo festival : festivals) {
                 if (festival.getContentId() == null) continue;
-
-                SyncPlace place = placeByContentId.get(festival.getContentId());
-                if (place == null) {
-                    unmatchedCount++;
-                    log.warn("[SKIP] contentId={}, {} - places에 매칭되는 관광지 없음",
-                            festival.getContentId(), festival.getTitle());
-                    continue;
-                }
 
                 LocalDate startDate = SyncDataTransformer.parseYyyyMmDd(festival.getEventStartDate());
                 LocalDate endDate = SyncDataTransformer.parseYyyyMmDd(festival.getEventEndDate());
@@ -265,24 +260,38 @@ public class ApiSyncBatchConfig {
                 }
 
                 boolean active = !endDate.isBefore(today);
-                String name = festival.getTitle() != null ? festival.getTitle().trim() : place.getName();
+                String name = festival.getTitle() != null ? festival.getTitle().trim() : "이름 정보 없음";
                 // 구코드: 축제 원본의 시도+시군구 코드 결합(26+440=26440), 없으면 매칭된 place의 값 사용
                 String districtCode = SyncDataTransformer.combineDistrictCode(
                         festival.getLDongRegnCd(), festival.getLDongSignguCd());
                 if (districtCode == null) {
-                    districtCode = place.getDistrictCode();
+                    districtCode = districtCodeByDistrictName.get(SyncDataTransformer.extractDistrictName(festival.getAddr1()));
                 }
-                // 축제 장소 주소: 원본 addr1 + addr2 조합(둘 다 없으면 "주소 정보 없음")
-                String placeAddress = SyncDataTransformer.buildAddress(festival.getAddr1(), festival.getAddr2());
-                upsertParams.add(new Object[]{place.getId(), name, Date.valueOf(startDate), Date.valueOf(endDate), active, districtCode, placeAddress});
+                if (districtCode == null) {
+                    invalidDistrictCount++;
+                    log.warn("[SKIP] contentId={}, {} - 구코드 확인 실패(addr1={})",
+                            festival.getContentId(), festival.getTitle(), festival.getAddr1());
+                    continue;
+                }
+                // 축제 장소 주소: 원본 addr1 + addr2 조합. 둘 다 없으면 API fallback이 가능하도록 null 저장.
+                String placeAddress = SyncDataTransformer.buildNullableAddress(festival.getAddr1(), festival.getAddr2());
+                Optional<Long> placeId = placeIdResolver.resolveFestivalVenue(placeAddress, districtCode);
+                if (placeId.isEmpty()) {
+                    unmatchedVenueCount++;
+                    log.info("contentId={}, {} - 개최 장소 매칭 실패, place_id=null 저장",
+                            festival.getContentId(), festival.getTitle());
+                }
+
+                upsertParams.add(new Object[]{festival.getContentId(), placeId.orElse(null), name, Date.valueOf(startDate), Date.valueOf(endDate), active, districtCode, placeAddress});
             }
 
             String sql = """
                     INSERT INTO busan_timing_api.place_festivals
-                        (place_id, name, start_date, end_date, active, district_code, place_address, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, now(), now())
-                    ON CONFLICT (place_id)
-                    DO UPDATE SET name = EXCLUDED.name,
+                        (content_id, place_id, name, start_date, end_date, active, district_code, place_address, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+                    ON CONFLICT (content_id)
+                    DO UPDATE SET place_id = EXCLUDED.place_id,
+                                  name = EXCLUDED.name,
                                   start_date = EXCLUDED.start_date,
                                   end_date = EXCLUDED.end_date,
                                   active = EXCLUDED.active,
@@ -296,8 +305,8 @@ public class ApiSyncBatchConfig {
                 jdbcTemplate.batchUpdate(sql, batch);
             }
 
-            log.info("place_festivals 동기화 완료: upsert={}건, 매칭실패={}건, 기간오류={}건",
-                    upsertParams.size(), unmatchedCount, invalidDateCount);
+            log.info("place_festivals 동기화 완료: upsert={}건, 장소매칭실패={}건, 기간오류={}건, 구코드오류={}건",
+                    upsertParams.size(), unmatchedVenueCount, invalidDateCount, invalidDistrictCount);
 
             return RepeatStatus.FINISHED;
         };

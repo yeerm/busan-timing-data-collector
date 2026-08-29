@@ -55,6 +55,14 @@ public final class SyncDataTransformer {
         return addr1.trim() + " " + addr2.trim();
     }
 
+    public static String buildNullableAddress(String addr1, String addr2) {
+        boolean hasAddr1 = addr1 != null && !addr1.isBlank();
+        boolean hasAddr2 = addr2 != null && !addr2.isBlank();
+
+        if (!hasAddr1 && !hasAddr2) return null;
+        return buildAddress(addr1, addr2);
+    }
+
     public static String resolveImageUrl(String firstImage, String firstImage2) {
         if (firstImage != null && !firstImage.isBlank()) return firstImage;
         if (firstImage2 != null && !firstImage2.isBlank()) return firstImage2;

@@ -122,6 +122,18 @@ class SyncDataTransformerTest {
     }
 
     @Test
+    void buildNullableAddressReturnsNullWhenNoAddressExists() {
+        assertNull(SyncDataTransformer.buildNullableAddress(null, null));
+        assertNull(SyncDataTransformer.buildNullableAddress("", " "));
+    }
+
+    @Test
+    void buildNullableAddressCombinesPresentAddressParts() {
+        assertEquals("부산광역시 수영구 광안해변로 219 2층",
+                SyncDataTransformer.buildNullableAddress("부산광역시 수영구 광안해변로 219", "2층"));
+    }
+
+    @Test
     void resolveImageUrl_prefersFirstImage() {
         assertEquals("http://img1.jpg",
                 SyncDataTransformer.resolveImageUrl("http://img1.jpg", "http://img2.jpg"));
